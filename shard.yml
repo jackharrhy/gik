@@ -1,0 +1,25 @@
+name: gik
+version: 0.1.0
+
+authors:
+  - Jack Arthur Harrhy <me@jackharrhy.com>
+
+targets:
+  gik:
+    main: src/bot.cr
+
+dependencies:
+  sqlite3:
+    github: crystal-lang/crystal-sqlite3
+  discordcr:
+    github: discordcr/discordcr
+    branch: cr-0.34
+  dotenv:
+    github: gdotdesign/cr-dotenv
+  magickwand-crystal:
+    github: blocknotes/magickwand-crystal
+    branch: im_6.9.7-3
+
+crystal: 0.34.0
+
+license: MIT

@@ -1,0 +1,10 @@
+version: '3'
+
+services:
+  gik:
+    image: jackharrhy/gik
+    build: ./.
+    env_file:
+      - ./.env
+    volumes:
+      - ./data/stackcoin.db:/app/data/stackcoin.db
