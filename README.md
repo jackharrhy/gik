@@ -48,8 +48,6 @@ RUN shards build gik --release
 # prod
 FROM ubuntu:focal
 
-#ENV MAGICK_HOME /usr/lib
-
 RUN apt update && apt install -y \
   imagemagick-6.q16 \
   libssl1.1 \
@@ -61,8 +59,6 @@ WORKDIR /app
 COPY ./.env.dist /app/.env
 COPY --from=build /build/bin/gik /app/gik
 
-RUN ldd /app/gik
-
 CMD ["/app/gik"]
 ```
 
@@ -71,11 +67,6 @@ CMD ["/app/gik"]
 ```dockerfile
 # build
 FROM crystallang/crystal:0.34.0-build as build
-
-RUN uname -a
-RUN cat /etc/issue
-
-RUN exit 1
 
 RUN apt update && apt install -y \
   libsqlite3-dev \
@@ -101,13 +92,9 @@ RUN apt update && apt install -y \
   libssl1.1 \
   ca-certificates
 
-#ENV MAGICK_HOME /usr/lib
-
 WORKDIR /app
 COPY ./.env.dist /app/.env
 COPY --from=build /build/bin/gik /app/gik
-
-RUN ldd /app/gik
 
 CMD ["/app/gik"]
 ```
