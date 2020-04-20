@@ -27,7 +27,6 @@ SUPPORTED_IMAGE_EXTENSIONS = [
   ".tga",
   ".bmp",
   ".svg",
-  ".psd",
 ]
 
 TOKEN     = "Bot #{ENV["GIK_DISCORD_TOKEN"]}"
@@ -103,21 +102,27 @@ client.on_message_create do |message|
     height_mod = mod
 
     magick do |wand|
-      if LibMagick.magickReadImage(wand, input_path.to_s)
-        width = LibMagick.magickGetImageWidth(wand) * width_mod
-        width = 2000 if width > 2000
+      read_image_correctly = LibMagick.magickReadImage(wand, input_path.to_s)
+      raise "failed to read image" unless read_image_correctly
 
-        height = LibMagick.magickGetImageHeight(wand) * height_mod
-        height = 2000 if height > 2000
+      width = LibMagick.magickGetImageWidth(wand) * width_mod
+      width = 2000 if width > 2000
+      puts width
 
-        # liquid rescale half size
-        LibMagick.magickLiquidRescaleImage wand, width, height, 1, 1
+      height = LibMagick.magickGetImageHeight(wand) * height_mod
+      height = 2000 if height > 2000
+      puts height
 
-        # bring back to og size by inverting mod
-        LibMagick.magickResizeImage wand, width / mod, height / mod, LibMagick::FilterType::LanczosFilter
+      # liquid rescale half size
+      rescaled_correctly = LibMagick.magickLiquidRescaleImage wand, width, height, 1, 1
+      raise "failed to liquid rescale" unless rescaled_correctly
 
-        LibMagick.magickWriteImage wand, output_path.to_s
-      end
+      # bring back to og size by inverting mod
+      resized_correctly = LibMagick.magickResizeImage wand, width / mod, height / mod, LibMagick::FilterType::LanczosFilter
+      raise "failed to resize" unless rescaled_correctly
+
+      wrote_image_correctly = LibMagick.magickWriteImage wand, output_path.to_s
+      raise "failed to write image" unless wrote_image_correctly
     end
 
     File.delete input_path
@@ -142,6 +147,12 @@ client.on_message_create do |message|
     puts oops
     client.create_message message.channel_id, "```#{oops}```"
   end
+end
+
+Signal::INT.trap do
+  db.close
+  puts "bye!"
+  exit
 end
 
 client.run

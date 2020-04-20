@@ -18,7 +18,6 @@ dependencies:
     github: gdotdesign/cr-dotenv
   magickwand-crystal:
     github: blocknotes/magickwand-crystal
-    branch: im_6.9.7-3
 
 crystal: 0.34.0
 
