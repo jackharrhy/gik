@@ -1,187 +1,117 @@
 require "uri"
 require "uuid"
-require "log"
 require "http/client"
 
-require "sqlite3"
-require "db"
-require "dotenv"
 require "discordcr"
-require "magickwand-crystal"
 
-backend = Log::IOBackend.new
-Log.builder.bind "*", :info, backend
+class Gik::Cord
+  class Bot < Gik::Base
+    def initialize(@config : Gik::Config, @db : DB::Database)
+      @client = Discord::Client.new token: @config.token, client_id: @config.client_id
+      @cache = Discord::Cache.new @client
 
-begin
-  Dotenv.load
-end
-
-TMP = "/tmp/gik/"
-Dir.mkdir_p TMP
-
-SUPPORTED_IMAGE_EXTENSIONS = [
-  ".png",
-  ".jpg",
-  ".jpeg",
-  ".gif",
-  ".tga",
-  ".bmp",
-  ".svg",
-]
-
-TOKEN        = "Bot #{ENV["GIK_DISCORD_TOKEN"]}"
-CLIENT_ID    = ENV["GIK_DISCORD_CLIENT_ID"].to_u64
-PREFIX       = ENV["GIK_PREFIX"]
-DATABASE_URL = ENV["GIK_DATABASE_URL"]
-
-client = Discord::Client.new(token: TOKEN, client_id: CLIENT_ID)
-cache = Discord::Cache.new(client)
-
-db = DB.open DATABASE_URL
-
-db.exec "CREATE TABLE IF NOT EXISTS art (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  message_id TEXT NOT NULL,
-  user_id TEXT NOT NULL,
-  url TEXT NOT NULL,
-  time INTERGER
-)"
-
-def magick
-  LibMagick.magickWandGenesis
-  wand = LibMagick.newMagickWand
-  yield wand
-  LibMagick.destroyMagickWand wand
-  LibMagick.magickWandTerminus
-end
-
-def url_from_message(message)
-  if message.embeds.size > 0
-    embed = message.embeds.first
-    if embed.type == "image"
-      return embed.url if embed.url.is_a? String
-    end
-  end
-
-  if message.attachments.size > 0
-    return message.attachments.first.url
-  end
-end
-
-class Gik
-  def initialize(@db : DB::Database, @client : Discord::Client)
-  end
-
-  def find_url(message)
-    url = url_from_message message
-
-    if !url.is_a? String
-      @client.get_channel_messages(message.channel_id, 20).each do |historical_message|
-        url = url_from_message historical_message
-        break if url.is_a? String
+      @client.on_message_create do |message|
+        begin
+          next if !message.content.starts_with? @config.prefix
+          handle_message message
+        rescue ex
+          oops = ex.inspect_with_backtrace
+          puts oops
+          @client.create_message message.channel_id, "```#{oops}```"
+        end
       end
     end
 
-    url
-  end
-
-  def valid_path(url)
-    uri = URI.parse url
-
-    path = Path[uri.path]
-    return unless path.extension != ""
-    return unless SUPPORTED_IMAGE_EXTENSIONS.includes? path.extension
-
-    path
-  end
-
-  def magickify(wand, input_path, output_path, width_mod, height_mod)
-    read_image_correctly = LibMagick.magickReadImage(wand, input_path.to_s)
-    raise "failed to read image" unless read_image_correctly
-
-    width = LibMagick.magickGetImageWidth(wand) * width_mod
-    width = 2000 if width > 2000 # clip so not beeg
-
-    height = LibMagick.magickGetImageHeight(wand) * height_mod
-    height = 2000 if height > 2000 # clip so not beeg
-
-    # liquid rescale based on mods
-    rescaled_correctly = LibMagick.magickLiquidRescaleImage wand, width, height, 1, 1
-    raise "failed to liquid rescale" unless rescaled_correctly
-
-    # bring back to og size by inverting mods
-    resized_correctly = LibMagick.magickResizeImage wand, width / width_mod, height / height_mod, LibMagick::FilterType::LanczosFilter
-    raise "failed to resize" unless rescaled_correctly
-
-    wrote_image_correctly = LibMagick.magickWriteImage wand, output_path.to_s
-    raise "failed to write image" unless wrote_image_correctly
-  end
-
-  def log_art(output_discord_cdn_url, message)
-    args = [] of DB::Any
-    args << message.id.to_s
-    args << message.author.id.to_s
-    args << output_discord_cdn_url
-    args << Time.utc
-    @db.exec "INSERT INTO art(message_id, user_id, url, time) VALUES (?, ?, ?, ?)", args: args
-  end
-
-  def handle_message(message)
-    url = find_url message
-    return unless url.is_a? String
-
-    path = valid_path url
-    return unless path.is_a? Path
-
-    @client.trigger_typing_indicator message.channel_id
-
-    input_path = Path["#{TMP}input_#{UUID.random}#{path.extension}"]
-    output_path = Path["#{TMP}output_#{UUID.random}#{path.extension}"]
-
-    HTTP::Client.get(url) do |response|
-      File.write input_path, response.body_io
+    def run!
+      @client.run
     end
 
-    mod = 0.5
-    width_mod = mod
-    height_mod = mod
+    def self.url_from_message(message)
+      if message.embeds.size > 0
+        embed = message.embeds.first
+        if embed.type == "image"
+          return embed.url if embed.url.is_a? String
+        end
+      end
 
-    magick do |wand|
-      magickify wand, input_path, output_path, width_mod, height_mod
+      if message.attachments.size > 0
+        return message.attachments.first.url
+      end
     end
 
-    File.delete input_path
+    def find_url(message)
+      url = Bot.url_from_message message
 
-    sent_message = @client.upload_file(
-      channel_id: message.channel_id,
-      content: "",
-      file: File.open output_path
-    )
+      if !url.is_a? String
+        @client.get_channel_messages(message.channel_id, 20).each do |historical_message|
+          url = Bot.url_from_message historical_message
+          break if url.is_a? String
+        end
+      end
 
-    File.delete output_path
+      url
+    end
 
-    output_discord_cdn_url = sent_message.attachments.first.url
-    log_art output_discord_cdn_url, message
+    def self.valid_path(url)
+      uri = URI.parse url
+
+      path = Path[uri.path]
+      return unless path.extension != ""
+      return unless SUPPORTED_IMAGE_EXTENSIONS.includes? path.extension
+
+      path
+    end
+
+    def log_art(output_discord_cdn_url, message)
+      args = [] of DB::Any
+      args << message.id.to_s
+      args << message.author.id.to_s
+      args << output_discord_cdn_url
+      args << Time.utc
+      log_art args
+    end
+
+    def log_art(db_args)
+      @db.exec "INSERT INTO art(message_id, user_id, url, time) VALUES (?, ?, ?, ?)", args: db_args
+    end
+
+    def handle_message(message)
+      url = find_url message
+      return unless url.is_a? String
+
+      path = Bot.valid_path url
+      return unless path.is_a? Path
+
+      @client.trigger_typing_indicator message.channel_id
+
+      tmp = Gik::Temp::TMP_DIR
+      input_path = Path["#{tmp}input_#{UUID.random}#{path.extension}"]
+      output_path = Path["#{tmp}output_#{UUID.random}#{path.extension}"]
+
+      HTTP::Client.get(url) do |response|
+        File.write input_path, response.body_io
+      end
+
+      mod = 0.5
+      width_mod = mod
+      height_mod = mod
+
+      Bot.magick do |wand|
+        magickify wand, input_path, output_path, width_mod, height_mod
+      end
+
+      File.delete input_path
+
+      sent_message = @client.upload_file(
+        channel_id: message.channel_id,
+        content: "",
+        file: File.open output_path
+      )
+
+      File.delete output_path
+
+      output_discord_cdn_url = sent_message.attachments.first.url
+      log_art output_discord_cdn_url, message
+    end
   end
 end
-
-gik = Gik.new db, client
-
-client.on_message_create do |message|
-  begin
-    next if !message.content.starts_with? PREFIX
-    gik.handle_message message
-  rescue ex
-    oops = ex.inspect_with_backtrace
-    puts oops
-    client.create_message message.channel_id, "```#{oops}```"
-  end
-end
-
-{Signal::INT, Signal::TERM}.each &.trap do
-  db.close
-  puts "bye"
-  exit
-end
-
-client.run

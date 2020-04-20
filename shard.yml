@@ -6,7 +6,7 @@ authors:
 
 targets:
   gik:
-    main: src/bot.cr
+    main: src/cli.cr
 
 dependencies:
   sqlite3:
