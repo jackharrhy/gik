@@ -149,9 +149,9 @@ client.on_message_create do |message|
   end
 end
 
-Signal::INT.trap do
+{Signal::INT, Signal::TERM}.each &.trap do
   db.close
-  puts "bye!"
+  puts "bye"
   exit
 end
 

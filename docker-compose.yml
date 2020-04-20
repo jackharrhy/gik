@@ -7,4 +7,4 @@ services:
     env_file:
       - ./.env
     volumes:
-      - ./data/stackcoin.db:/app/data/stackcoin.db
+      - ./data/:/app/data/
