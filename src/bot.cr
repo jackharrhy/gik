@@ -13,7 +13,8 @@ class Gik::Cord
       @client.on_message_create do |message|
         begin
           next if !message.content.starts_with? @config.prefix
-          handle_message message
+          did_a_thing = handle_message message
+          @client.create_message message.channel_id, "Couldn't find an image to do anything fun with :(" if !did_a_thing
         rescue ex
           oops = ex.inspect_with_backtrace
           puts oops
@@ -77,10 +78,10 @@ class Gik::Cord
 
     def handle_message(message)
       url = find_url message
-      return unless url.is_a? String
+      return false unless url.is_a? String
 
       path = Bot.valid_path url
-      return unless path.is_a? Path
+      return false unless path.is_a? Path
 
       @client.trigger_typing_indicator message.channel_id
 
@@ -112,6 +113,8 @@ class Gik::Cord
 
       output_discord_cdn_url = sent_message.attachments.first.url
       log_art output_discord_cdn_url, message
+
+      true
     end
   end
 end
