@@ -9,15 +9,17 @@ targets:
     main: src/cli.cr
 
 dependencies:
+  dotenv:
+    github: gdotdesign/cr-dotenv
+  magickwand-crystal:
+    github: blocknotes/magickwand-crystal
   sqlite3:
     github: crystal-lang/crystal-sqlite3
   discordcr:
     github: discordcr/discordcr
     branch: cr-0.34
-  dotenv:
-    github: gdotdesign/cr-dotenv
-  magickwand-crystal:
-    github: blocknotes/magickwand-crystal
+  kemal:
+    github: kemalcr/kemal
 
 crystal: 0.34.0
 

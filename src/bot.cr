@@ -1,5 +1,4 @@
 require "uri"
-require "uuid"
 require "http/client"
 
 require "discordcr"
@@ -53,14 +52,10 @@ class Gik::Cord
       url
     end
 
-    def self.valid_path(url)
+    def self.valid_url(url)
       uri = URI.parse url
 
-      path = Path[uri.path]
-      return unless path.extension != ""
-      return unless SUPPORTED_IMAGE_EXTENSIONS.includes? path.extension
-
-      path
+      self.valid_path Path[uri.path]
     end
 
     def log_art(output_discord_cdn_url, message)
@@ -80,26 +75,19 @@ class Gik::Cord
       url = find_url message
       return false unless url.is_a? String
 
-      path = Bot.valid_path url
+      path = Bot.valid_url url
       return false unless path.is_a? Path
 
       @client.trigger_typing_indicator message.channel_id
 
-      tmp = Gik::Temp::TMP_DIR
-      input_path = Path["#{tmp}input_#{UUID.random}#{path.extension}"]
-      output_path = Path["#{tmp}output_#{UUID.random}#{path.extension}"]
+      input_path, output_path = Bot.inp_out_paths path.extension
 
       HTTP::Client.get(url) do |response|
         File.write input_path, response.body_io
       end
 
-      mod = 0.5
-      width_mod = mod
-      height_mod = mod
-
-      Bot.magick do |wand|
-        magickify wand, input_path, output_path, width_mod, height_mod
-      end
+      magickify_args = MagickifyArgs.new
+      Bot.magickify input_path, output_path, magickify_args
 
       File.delete input_path
 

@@ -3,6 +3,7 @@ require "dotenv"
 
 require "./gik"
 require "./bot"
+require "./web"
 
 backend = Log::IOBackend.new
 Log.builder.bind "*", :info, backend
@@ -19,6 +20,9 @@ Gik::Database.init db
 
 bot = Gik::Cord::Bot.new config, db
 spawn(bot.run!)
+
+site = Gik::Web::Site.new config, db
+spawn(site.run!)
 
 {Signal::INT, Signal::TERM}.each &.trap do
   db.close
