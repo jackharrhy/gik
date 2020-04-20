@@ -29,9 +29,9 @@ SUPPORTED_IMAGE_EXTENSIONS = [
   ".svg",
 ]
 
-TOKEN     = "Bot #{ENV["GIK_DISCORD_TOKEN"]}"
-CLIENT_ID = ENV["GIK_DISCORD_CLIENT_ID"].to_u64
-PREFIX    = ENV["GIK_PREFIX"]
+TOKEN        = "Bot #{ENV["GIK_DISCORD_TOKEN"]}"
+CLIENT_ID    = ENV["GIK_DISCORD_CLIENT_ID"].to_u64
+PREFIX       = ENV["GIK_PREFIX"]
 DATABASE_URL = ENV["GIK_DATABASE_URL"]
 
 client = Discord::Client.new(token: TOKEN, client_id: CLIENT_ID)
@@ -68,27 +68,72 @@ def url_from_message(message)
   end
 end
 
-client.on_message_create do |message|
-  begin
-    next if !message.content.starts_with? PREFIX
+class Gik
+  def initialize(@db : DB::Database, @client : Discord::Client)
+  end
 
+  def find_url(message)
     url = url_from_message message
 
     if !url.is_a? String
-      client.get_channel_messages(message.channel_id, 20).each do |historical_message|
+      @client.get_channel_messages(message.channel_id, 20).each do |historical_message|
         url = url_from_message historical_message
         break if url.is_a? String
       end
     end
 
-    next unless url.is_a? String
+    url
+  end
 
+  def valid_path(url)
     uri = URI.parse url
-    path = Path[uri.path]
-    next unless path.extension != ""
-    next unless SUPPORTED_IMAGE_EXTENSIONS.includes? path.extension
 
-    client.trigger_typing_indicator message.channel_id
+    path = Path[uri.path]
+    return unless path.extension != ""
+    return unless SUPPORTED_IMAGE_EXTENSIONS.includes? path.extension
+
+    path
+  end
+
+  def magickify(wand, input_path, output_path, width_mod, height_mod)
+    read_image_correctly = LibMagick.magickReadImage(wand, input_path.to_s)
+    raise "failed to read image" unless read_image_correctly
+
+    width = LibMagick.magickGetImageWidth(wand) * width_mod
+    width = 2000 if width > 2000 # clip so not beeg
+
+    height = LibMagick.magickGetImageHeight(wand) * height_mod
+    height = 2000 if height > 2000 # clip so not beeg
+
+    # liquid rescale based on mods
+    rescaled_correctly = LibMagick.magickLiquidRescaleImage wand, width, height, 1, 1
+    raise "failed to liquid rescale" unless rescaled_correctly
+
+    # bring back to og size by inverting mods
+    resized_correctly = LibMagick.magickResizeImage wand, width / width_mod, height / height_mod, LibMagick::FilterType::LanczosFilter
+    raise "failed to resize" unless rescaled_correctly
+
+    wrote_image_correctly = LibMagick.magickWriteImage wand, output_path.to_s
+    raise "failed to write image" unless wrote_image_correctly
+  end
+
+  def log_art(output_discord_cdn_url, message)
+    args = [] of DB::Any
+    args << message.id.to_s
+    args << message.author.id.to_s
+    args << output_discord_cdn_url
+    args << Time.utc
+    @db.exec "INSERT INTO art(message_id, user_id, url, time) VALUES (?, ?, ?, ?)", args: args
+  end
+
+  def handle_message(message)
+    url = find_url message
+    return unless url.is_a? String
+
+    path = valid_path url
+    return unless path.is_a? Path
+
+    @client.trigger_typing_indicator message.channel_id
 
     input_path = Path["#{TMP}input_#{UUID.random}#{path.extension}"]
     output_path = Path["#{TMP}output_#{UUID.random}#{path.extension}"]
@@ -102,32 +147,12 @@ client.on_message_create do |message|
     height_mod = mod
 
     magick do |wand|
-      read_image_correctly = LibMagick.magickReadImage(wand, input_path.to_s)
-      raise "failed to read image" unless read_image_correctly
-
-      width = LibMagick.magickGetImageWidth(wand) * width_mod
-      width = 2000 if width > 2000
-      puts width
-
-      height = LibMagick.magickGetImageHeight(wand) * height_mod
-      height = 2000 if height > 2000
-      puts height
-
-      # liquid rescale half size
-      rescaled_correctly = LibMagick.magickLiquidRescaleImage wand, width, height, 1, 1
-      raise "failed to liquid rescale" unless rescaled_correctly
-
-      # bring back to og size by inverting mod
-      resized_correctly = LibMagick.magickResizeImage wand, width / mod, height / mod, LibMagick::FilterType::LanczosFilter
-      raise "failed to resize" unless rescaled_correctly
-
-      wrote_image_correctly = LibMagick.magickWriteImage wand, output_path.to_s
-      raise "failed to write image" unless wrote_image_correctly
+      magickify wand, input_path, output_path, width_mod, height_mod
     end
 
     File.delete input_path
 
-    sent_message = client.upload_file(
+    sent_message = @client.upload_file(
       channel_id: message.channel_id,
       content: "",
       file: File.open output_path
@@ -136,12 +161,16 @@ client.on_message_create do |message|
     File.delete output_path
 
     output_discord_cdn_url = sent_message.attachments.first.url
-    args = [] of DB::Any
-    args << message.id.to_s
-    args << message.author.id.to_s
-    args << output_discord_cdn_url
-    args << Time.utc
-    db.exec "INSERT INTO art(message_id, user_id, url, time) VALUES (?, ?, ?, ?)", args: args
+    log_art output_discord_cdn_url, message
+  end
+end
+
+gik = Gik.new db, client
+
+client.on_message_create do |message|
+  begin
+    next if !message.content.starts_with? PREFIX
+    gik.handle_message message
   rescue ex
     oops = ex.inspect_with_backtrace
     puts oops
