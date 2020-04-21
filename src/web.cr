@@ -3,6 +3,8 @@ require "kemal"
 class Gik::Web
   class Site < Gik::Base
     def initialize(@config : Gik::Config, @db : DB::Database)
+      Kemal.config.env = "production"
+
       get "/" do |env|
         "_wip_"
       end
