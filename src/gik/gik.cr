@@ -4,6 +4,8 @@ require "sqlite3"
 require "db"
 require "magickwand-crystal"
 
+require "./result.cr"
+
 module Gik
   class Config
     property token : String = ""
@@ -22,14 +24,35 @@ module Gik
   end
 
   class Database
-    def self.init(db)
+    def self.init(database_url)
+      db = DB.open database_url
+
       db.exec "CREATE TABLE IF NOT EXISTS art (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
+        uuid TEXT NOT NULL,
+        time INTERGER NOT NULL,
+        url TEXT NOT NULL,
+        original_filename TEXT,
+        public INTERGER NOT NULL
+      )"
+
+      db.exec "CREATE TABLE IF NOT EXISTS discord (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        art INTEGER NOT NULL,
         message_id TEXT NOT NULL,
         user_id TEXT NOT NULL,
-        url TEXT NOT NULL,
-        time INTERGER
+        guild_id TEXT,
+        FOREIGN KEY(art) REFERENCES art(id)
       )"
+
+      db.exec "CREATE TABLE IF NOT EXISTS web (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        art INTEGER NOT NULL,
+        user_agent TEXT,
+        FOREIGN KEY(art) REFERENCES art(id)
+      )"
+
+      db
     end
   end
 
@@ -64,11 +87,8 @@ module Gik
       LibMagick.magickWandTerminus
     end
 
-    def self.inp_out_paths(extension)
-      tmp = Gik::Temp::TMP_DIR
-      input_path = Path["#{tmp}input_#{UUID.random}#{extension}"]
-      output_path = Path["#{tmp}output_#{UUID.random}#{extension}"]
-      {input_path, output_path}
+    def self.tmp_path(prefix, extension)
+      Path["#{Gik::Temp::TMP_DIR}#{prefix}_#{UUID.random}#{extension}"]
     end
 
     def self.valid_path(path)
@@ -121,6 +141,26 @@ module Gik
       raise "failed to write image" unless wrote_image_correctly
     end
 
-    abstract def log_art(db_args)
+    def log_art(url : String, original_filename : String, is_public : Bool, uuid = UUID.random)
+      public = 0
+      public = 1 if is_public
+
+      args = [] of DB::Any
+      args << uuid.to_s
+      args << Time.utc
+      args << url
+      args << original_filename
+      args << public
+
+      last_row_id = nil
+      @db.transaction do |tx|
+        cnn = tx.connection
+        cnn.exec "INSERT INTO art(uuid, time, url, original_filename, public) VALUES (?, ?, ?, ?, ?)", args: args
+        last_row_id = cnn.query_one "SELECT last_insert_rowid();", as: Int
+        tx.commit
+      end
+
+      {last_row_id, uuid}
+    end
   end
 end

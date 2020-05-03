@@ -3,6 +3,8 @@ require "http/client"
 
 require "discordcr"
 
+require "./gik"
+
 class Gik::Cord
   class Bot < Gik::Base
     def initialize(@config : Gik::Config, @db : DB::Database)
@@ -12,8 +14,9 @@ class Gik::Cord
       @client.on_message_create do |message|
         begin
           next if !message.content.starts_with? @config.prefix
-          did_a_thing = handle_message message
-          @client.create_message message.channel_id, "Couldn't find an image to do anything fun with :(" if !did_a_thing
+
+          result = handle_message message
+          @client.create_message message.channel_id, result.message if result.is_a? Result::Error
         rescue ex
           oops = ex.inspect_with_backtrace
           puts oops
@@ -58,29 +61,37 @@ class Gik::Cord
       self.valid_path Path[uri.path]
     end
 
-    def log_art(output_discord_cdn_url, message)
+    def log_discord(output_discord_cdn_url : String, original_filename : String, is_public : Bool, message : Discord::Message)
+      art_id, art_uuid = log_art output_discord_cdn_url, original_filename, is_public
+
+      channel = @cache.resolve_channel message.channel_id
+
+      guild_id = channel.guild_id
+      if guild_id.is_a? Discord::Snowflake
+        guild_id = guild_id.to_s
+      else
+        guild_id = nil
+      end
+
       args = [] of DB::Any
+      args << art_id
       args << message.id.to_s
       args << message.author.id.to_s
-      args << output_discord_cdn_url
-      args << Time.utc
-      log_art args
-    end
-
-    def log_art(db_args)
-      @db.exec "INSERT INTO art(message_id, user_id, url, time) VALUES (?, ?, ?, ?)", args: db_args
+      args << guild_id
+      @db.exec "INSERT INTO discord(art, message_id, user_id, guild_id) VALUES (?, ?, ?, ?)", args: args
     end
 
     def handle_message(message)
       url = find_url message
-      return false unless url.is_a? String
+      return Result::Error.new "Couldn't find an image :(" unless url.is_a? String
 
       path = Bot.valid_url url
-      return false unless path.is_a? Path
+      return Result::Error.new "Invalid URL, maybe a unknown file extension?" unless path.is_a? Path
 
       @client.trigger_typing_indicator message.channel_id
 
-      input_path, output_path = Bot.inp_out_paths path.extension
+      input_path = Bot.tmp_path "input", path.extension
+      output_path = Bot.tmp_path "output", path.extension
 
       HTTP::Client.get(url) do |response|
         File.write input_path, response.body_io
@@ -100,9 +111,9 @@ class Gik::Cord
       File.delete output_path
 
       output_discord_cdn_url = sent_message.attachments.first.url
-      log_art output_discord_cdn_url, message
+      log_discord output_discord_cdn_url, path.basename, false, message
 
-      true
+      nil
     end
   end
 end
