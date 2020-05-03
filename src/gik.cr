@@ -73,7 +73,7 @@ module Gik
 
     def self.valid_path(path)
       return unless path.extension != ""
-      return unless SUPPORTED_IMAGE_EXTENSIONS.includes? path.extension
+      return unless SUPPORTED_IMAGE_EXTENSIONS.includes? path.extension.downcase
       path
     end
 
