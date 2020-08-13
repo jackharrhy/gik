@@ -1,9 +1,7 @@
 require "log"
 require "dotenv"
 
-require "./gik"
-require "./bot"
-require "./web"
+require "./gik/*"
 
 backend = Log::IOBackend.new
 Log.builder.bind "*", :info, backend
@@ -15,8 +13,7 @@ end
 Gik::Temp.init
 
 config = Gik::Config.from_env
-db = DB.open config.database_url
-Gik::Database.init db
+db = Gik::Database.init config.database_url
 
 bot = Gik::Cord::Bot.new config, db
 spawn(bot.run!)
