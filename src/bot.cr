@@ -11,7 +11,7 @@ class Gik::Cord
 
       @client.on_message_create do |message|
         begin
-          next if !message.content.starts_with? @config.prefix
+          next if !message.content.downcase.starts_with? @config.prefix
           did_a_thing = handle_message message
           @client.create_message message.channel_id, "Couldn't find an image to do anything fun with :(" if !did_a_thing
         rescue ex
