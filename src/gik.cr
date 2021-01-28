@@ -28,7 +28,7 @@ module Gik
         message_id TEXT NOT NULL,
         user_id TEXT NOT NULL,
         url TEXT NOT NULL,
-        time INTERGER
+        time INTEGER
       )"
     end
   end
